@@ -103,4 +103,19 @@ class GenerateResponse(BaseModel):
     is_demo: bool = False
     demo_notice: Optional[str] = None
     error: Optional[str] = None
+    # Real AI Image Generation fields
+    image_url: Optional[str] = None
+    image_b64: Optional[str] = None
+    image_prompt: Optional[str] = None
+    image_provider: Optional[str] = None
+    image_model: Optional[str] = None
+    image_status: Optional[str] = None
+    image_error: Optional[str] = None
+    image_metadata: Optional[dict] = None
+
+
+class RegenerateImageRequest(BaseModel):
+    prompt: str = Field(..., min_length=10)
+    category: str = "process"
+    theme: Optional[str] = "default"
 

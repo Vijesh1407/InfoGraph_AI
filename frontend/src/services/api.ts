@@ -42,3 +42,31 @@ export async function checkHealth() {
   const { data } = await api.get('/health');
   return data;
 }
+
+export async function getSystemConfig() {
+  const { data } = await api.get('/infographics/config');
+  return data;
+}
+
+export async function regenerateImage(
+  prompt: string,
+  category: string,
+  theme: string = 'default',
+) {
+  const { data } = await api.post('/infographics/regenerate-image', {
+    prompt,
+    category,
+    theme,
+  });
+  return data;
+}
+
+export function getFullImageUrl(urlOrPath: string): string {
+  if (!urlOrPath) return '';
+  if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://') || urlOrPath.startsWith('data:')) {
+    return urlOrPath;
+  }
+  // Remove /api/v1 prefix if BASE already contains it
+  const baseRoot = BASE.replace(/\/api\/v1\/?$/, '');
+  return `${baseRoot}${urlOrPath.startsWith('/') ? '' : '/'}${urlOrPath}`;
+}

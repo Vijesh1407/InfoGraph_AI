@@ -35,5 +35,6 @@ desktop.ini
 *.swp
 *.swo
 
-# Test output
+# Test output & generated assets
 test_api.py
+backend/app/generated_images/

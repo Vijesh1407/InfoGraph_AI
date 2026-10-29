@@ -9,8 +9,8 @@ import axios from 'axios';
 import type {
   InfographicData, InfographicFormat, ThemeName, GenerateResponse, ThemeConfig,
 } from '../types/infographic';
-import { InfographicRenderer } from '../components/InfographicRenderer';
-import { generateInfographic, generateFromPdf, extractPdf } from '../services/api';
+import { InfographicImageDisplay } from '../components/InfographicImageDisplay';
+import { generateInfographic, generateFromPdf, extractPdf, regenerateImage, getSystemConfig } from '../services/api';
 import { THEMES } from '../services/themes';
 
 interface HistoryItem {
@@ -24,6 +24,11 @@ interface HistoryItem {
   timestamp: string;
   isDemo: boolean;
   demoNotice?: string | null;
+  imageUrl?: string | null;
+  imageB64?: string | null;
+  imagePrompt?: string | null;
+  imageStatus?: string | null;
+  imageError?: string | null;
 }
 
 const FORMAT_OPTIONS: { id: InfographicFormat; label: string; icon: string; desc: string }[] = [
@@ -107,6 +112,8 @@ export const WorkspacePage: React.FC = () => {
 
   const [exporting, setExporting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [regeneratingImage, setRegeneratingImage] = useState(false);
+  const [hasCredentials, setHasCredentials] = useState<boolean | null>(null);
 
   const infographicRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -114,6 +121,15 @@ export const WorkspacePage: React.FC = () => {
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const activeTheme: ThemeConfig = THEMES[theme] || THEMES.default;
+
+  // Check system config on mount
+  useEffect(() => {
+    getSystemConfig()
+      .then((cfg) => {
+        setHasCredentials(Boolean(cfg.has_credentials ?? cfg.has_hf_token));
+      })
+      .catch(() => {});
+  }, []);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -186,7 +202,7 @@ export const WorkspacePage: React.FC = () => {
       if (res.success && res.data) {
         setCurrentResult(res);
 
-        // Add to history associating result with its prompt
+        // Add to history associating result with its prompt and image assets
         const newItem: HistoryItem = {
           id: `gen-${Date.now()}`,
           title: res.data.title || 'Infographic',
@@ -198,6 +214,11 @@ export const WorkspacePage: React.FC = () => {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           isDemo: res.is_demo,
           demoNotice: res.demo_notice,
+          imageUrl: res.image_url,
+          imageB64: res.image_b64,
+          imagePrompt: res.image_prompt,
+          imageStatus: res.image_status,
+          imageError: res.image_error,
         };
         setHistory((prev) => [newItem, ...prev]);
         setActiveHistoryId(newItem.id);
@@ -215,6 +236,55 @@ export const WorkspacePage: React.FC = () => {
       setError(msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRegenerateImage = async () => {
+    if (!currentResult?.image_prompt || regeneratingImage) return;
+    setRegeneratingImage(true);
+    setError('');
+    try {
+      const res = await regenerateImage(
+        currentResult.image_prompt,
+        currentResult.format_used || format,
+        theme,
+      );
+      if (res.success) {
+        setCurrentResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                image_url: res.image_url,
+                image_b64: res.image_b64,
+                image_status: 'generated',
+                image_error: null,
+                image_metadata: res.image_metadata,
+              }
+            : null
+        );
+        // Also update active history item
+        if (activeHistoryId) {
+          setHistory((prev) =>
+            prev.map((item) =>
+              item.id === activeHistoryId
+                ? {
+                    ...item,
+                    imageUrl: res.image_url,
+                    imageB64: res.image_b64,
+                    imageStatus: 'generated',
+                    imageError: null,
+                  }
+                : item
+            )
+          );
+        }
+      } else {
+        setError(res.image_error || 'Failed to regenerate image with FLUX.1 (Cloudflare Workers AI).');
+      }
+    } catch {
+      setError('Image regeneration request failed.');
+    } finally {
+      setRegeneratingImage(false);
     }
   };
 
@@ -237,6 +307,11 @@ export const WorkspacePage: React.FC = () => {
       format_used: item.format,
       is_demo: item.isDemo,
       demo_notice: item.demoNotice,
+      image_url: item.imageUrl,
+      image_b64: item.imageB64,
+      image_prompt: item.imagePrompt,
+      image_status: item.imageStatus,
+      image_error: item.imageError,
     });
     setFormat(item.format);
     setTheme(item.theme);
@@ -246,6 +321,14 @@ export const WorkspacePage: React.FC = () => {
   };
 
   const handleExportPng = async () => {
+    // If active view has direct image asset and DOM export is not needed
+    if (currentResult?.image_b64) {
+      const link = document.createElement('a');
+      link.href = currentResult.image_b64;
+      link.download = `infograph-flux-${Date.now()}.png`;
+      link.click();
+      return;
+    }
     if (!infographicRef.current) return;
     setExporting(true);
     try {
@@ -497,19 +580,34 @@ export const WorkspacePage: React.FC = () => {
             {/* ── Loading State / Thinking ───────────────────────────────── */}
             {loading && (
               <div className="flex items-start gap-3 w-full animate-fade-in">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-brand-500 to-accent-500 flex items-center justify-center flex-shrink-0 shadow-md">
-                  <Sparkles size={16} className="text-white animate-spin-slow" />
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-500 to-accent-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-brand-500/25">
+                  <Sparkles size={18} className="text-white animate-spin-slow" />
                 </div>
-                <div className="flex-1 bg-surface-800/80 border border-white/10 rounded-2xl p-6">
+                <div className="flex-1 bg-surface-800/90 border border-white/10 rounded-2xl p-5 shadow-xl">
                   <div className="flex items-center gap-3">
                     <div className="w-4 h-4 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm font-medium text-white/90">
-                      Structuring content & composing infographic…
+                    <span className="text-sm font-semibold text-white">
+                      Synthesizing AI Infographic…
+                    </span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-300 border border-brand-500/30 font-medium">
+                      FLUX.1-schnell · Cloudflare Workers AI
                     </span>
                   </div>
-                  <p className="text-xs text-white/40 mt-2">
-                    Extracting key principles, organizing relationships, and styling layout.
-                  </p>
+
+                  <div className="mt-3.5 space-y-1.5 text-xs text-white/50 pl-7 border-l-2 border-brand-500/30 ml-2">
+                    <p className="flex items-center gap-2 text-white/80">
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-400" />
+                      1. Extracting structured knowledge & category schema with LLM
+                    </p>
+                    <p className="flex items-center gap-2 text-white/80">
+                      <span className="w-1.5 h-1.5 rounded-full bg-accent-400" />
+                      2. Constructing category-aware visual prompt & compositional hierarchy
+                    </p>
+                    <p className="flex items-center gap-2 text-white/80">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      3. Synthesizing generative infographic visuals with FLUX.1-schnell (Cloudflare Workers AI)
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
@@ -519,7 +617,7 @@ export const WorkspacePage: React.FC = () => {
               <div className="flex flex-col gap-4 w-full animate-slide-up">
                 {/* Header Controls: Live Theme Switcher & Regenerate */}
                 <div className="flex items-center justify-between gap-2 px-1">
-                  {/* Subtle, unobtrusive fallback notice if applicable */}
+                  {/* Subtle fallback notice if applicable */}
                   {currentResult.demo_notice ? (
                     <div className="flex items-center gap-1.5 text-[11px] text-white/45 bg-surface-800/70 border border-white/5 px-2.5 py-1 rounded-lg">
                       <Info size={12} className="text-white/40 flex-shrink-0" />
@@ -529,7 +627,7 @@ export const WorkspacePage: React.FC = () => {
                     <div />
                   )}
 
-                  {/* Quick Format & Theme Switchers */}
+                  {/* Quick Theme Switchers & Full Regenerate */}
                   <div className="flex items-center gap-2 ml-auto">
                     {/* Live Theme Switcher */}
                     <div className="flex items-center gap-1 bg-surface-800 border border-white/10 rounded-lg p-1">
@@ -550,22 +648,21 @@ export const WorkspacePage: React.FC = () => {
                     <button
                       onClick={() => handleGenerate()}
                       className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                      title="Regenerate Infographic"
+                      title="Regenerate Full Infographic"
                     >
                       <RefreshCw size={14} />
                     </button>
                   </div>
                 </div>
 
-                {/* The Infographic Container */}
-                <div className="flex justify-center w-full overflow-x-auto py-2">
-                  <div
-                    ref={infographicRef}
-                    className="infographic-export-root inline-block rounded-2xl"
-                  >
-                    <InfographicRenderer data={currentResult.data} theme={activeTheme} />
-                  </div>
-                </div>
+                {/* The Integrated AI Image & Infographic Container */}
+                <InfographicImageDisplay
+                  result={currentResult}
+                  theme={activeTheme}
+                  onRegenerateImage={handleRegenerateImage}
+                  regenerating={regeneratingImage}
+                  exportRef={infographicRef}
+                />
               </div>
             )}
 

@@ -93,6 +93,34 @@ export interface GenerateResponse {
   is_demo: boolean;
   demo_notice?: string | null;
   error?: string | null;
+  // Real AI image synthesis
+  image_url?: string | null;
+  image_b64?: string | null;
+  image_prompt?: string | null;
+  image_provider?: string | null;
+  image_model?: string | null;
+  image_status?:
+    | 'generated'
+    | 'missing_credentials'
+    | 'missing_token'
+    | 'auth_error'
+    | 'not_found'
+    | 'rate_limited'
+    | 'provider_error'
+    | 'unverified'
+    | 'model_loading'
+    | string
+    | null;
+  image_error?: string | null;
+  image_metadata?: Record<string, unknown> | null;
+}
+
+export interface SystemConfig {
+  llm_provider: string;
+  image_provider: string;
+  image_model: string;
+  has_credentials?: boolean;
+  has_hf_token?: boolean;
 }
 
 export interface ExtractPdfResponse {
